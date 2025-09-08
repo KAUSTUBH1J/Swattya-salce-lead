@@ -530,8 +530,8 @@ export const LeadForm = () => {
                   <SelectValue placeholder="Select billing type" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Prepaid">Prepaid</SelectItem>
-                  <SelectItem value="Postpaid">Postpaid</SelectItem>
+                  <SelectItem value="prepaid">Prepaid</SelectItem>
+                  <SelectItem value="postpaid">Postpaid</SelectItem>
                 </SelectContent>
               </Select>
             )}

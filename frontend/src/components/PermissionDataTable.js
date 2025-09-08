@@ -4,15 +4,17 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Alert, AlertDescription } from './ui/alert';
-import { 
-  Plus, 
-  Search, 
-  Download, 
-  Eye, 
-  Edit2, 
-  Trash2, 
+import {
+  Plus,
+  Search,
+  Download,
+  Eye,
+  Edit2,
+  Trash2,
   ChevronLeft,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   ArrowUpDown,
   AlertCircle
 } from 'lucide-react';
@@ -23,26 +25,47 @@ import { toast } from 'sonner';
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
-const PermissionDataTable = ({ 
-  data, 
-  columns, 
-  loading, 
-  error,
-  searchTerm,
-  setSearchTerm,
-  sortField,
-  sortDirection,
-  currentPage,
-  setCurrentPage,
-  totalPages,
-  onSort,
-  onView,
-  onEdit,
-  onDelete,
-  onAdd,
-  title,
+/** Safe error formatter to avoid React trying to render objects */
+const formatApiError = (err) => {
+  const detail = err?.response?.data?.detail ?? err?.response?.data ?? null;
+  if (Array.isArray(detail)) {
+    return detail.map(d => (typeof d === 'string' ? d : d?.msg ?? JSON.stringify(d))).join('; ');
+  }
+  if (detail && typeof detail === 'object') {
+    if (detail.message) return String(detail.message);
+    if (detail.detail) return String(detail.detail);
+    return Object.values(detail).map(v => (typeof v === 'string' ? v : JSON.stringify(v))).join('; ');
+  }
+  if (typeof detail === 'string') return detail;
+  return err?.message ?? 'An unexpected error occurred';
+};
+
+const PermissionDataTable = ({
+  data = [],
+  columns = [],
+  loading = false,
+  error = '',
+  searchTerm = '',
+  setSearchTerm = () => {},
+  sortField = '',
+  sortDirection = 'asc',
+  currentPage = 1,
+  setCurrentPage = () => {},
+  totalPages = 1,
+  onSort = () => {},
+  onView = () => {},
+  onEdit = () => {},
+  onDelete = () => {},
+  onAdd = () => {},
+  onExport = null,
+  title = 'Items',
+  description = '',
   modulePath = '',
-  entityName = ''
+  entityName = '',
+  additionalActions = null,
+  // allow parent to control page size
+  pageSize = 10,
+  setPageSize = () => {}
 }) => {
   const { canAdd, canEdit, canDelete, canView, hasPermission } = usePermissions();
 
@@ -53,11 +76,17 @@ const PermissionDataTable = ({
     }
 
     try {
+      // If parent provided an onExport handler, call it (preferred)
+      if (typeof onExport === 'function') {
+        await onExport();
+        return;
+      }
+
+      // Otherwise call default endpoint
       const endpoint = entityName ? `${entityName}/export` : `${modulePath.replace('/', '')}/export`;
       const response = await axios.get(`${API}/${endpoint}`);
-      
-      if (response.data.data && response.data.filename) {
-        // Create and download CSV file
+
+      if (response.data?.data && response.data?.filename) {
         const blob = new Blob([response.data.data], { type: 'text/csv' });
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -65,41 +94,62 @@ const PermissionDataTable = ({
         a.download = response.data.filename;
         a.click();
         window.URL.revokeObjectURL(url);
-        
         toast.success('Data exported successfully');
+      } else {
+        toast.error('Export returned no data');
       }
-    } catch (error) {
-      console.error('Export error:', error);
-      toast.error(error.response?.data?.detail || 'Failed to export data');
+    } catch (err) {
+      console.error('Export error:', err);
+      toast.error(formatApiError(err) || 'Failed to export data');
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center p-8">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
+  const goFirst = () => setCurrentPage(1);
+  const goPrev = () => setCurrentPage(prev => Math.max(1, prev - 1));
+  const goNext = () => setCurrentPage(prev => Math.min(totalPages, prev + 1));
+  const goLast = () => setCurrentPage(totalPages);
+
+  const onPageInput = (val) => {
+    const n = Number(val);
+    if (Number.isNaN(n)) return;
+    const clamped = Math.max(1, Math.min(totalPages, Math.floor(n)));
+    setCurrentPage(clamped);
+  };
 
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between w-full">
           <div>
             <CardTitle className="text-2xl font-bold">{title}</CardTitle>
-            <CardDescription>Manage {title.toLowerCase()}</CardDescription>
+            {description ? <CardDescription>{description}</CardDescription> : <CardDescription>Manage {title.toLowerCase()}</CardDescription>}
           </div>
+
           <div className="flex items-center space-x-2">
+            <div className="hidden md:flex items-center space-x-2">
+              <label htmlFor="pageSize" className="text-sm text-gray-600">Page size</label>
+              <select
+                id="pageSize"
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+                className="border rounded px-2 py-1 text-sm"
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+              </select>
+            </div>
+
             {canAdd(modulePath) && (
-              <Button onClick={onAdd} className="bg-blue-600 hover:bg-blue-700">
+              <Button onClick={onAdd} className="bg-blue-600 hover:bg-blue-700 flex items-center">
                 <Plus className="w-4 h-4 mr-2" />
-                Add {title.slice(0, -1)}
+                Add {title.replace(/s$/,'')}
               </Button>
             )}
           </div>
         </div>
       </CardHeader>
+
       <CardContent>
         {error && (
           <Alert className="mb-4 border-red-200 bg-red-50">
@@ -108,7 +158,7 @@ const PermissionDataTable = ({
           </Alert>
         )}
 
-        {/* Search and Export */}
+        {/* Search + Export row */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-2">
             <div className="relative">
@@ -118,147 +168,140 @@ const PermissionDataTable = ({
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-8 w-64"
+                aria-label="Search table"
               />
             </div>
           </div>
-          {hasPermission(modulePath, 'Export') && (
-            <Button
-              variant="outline"
-              onClick={handleExport}
-              className="flex items-center space-x-2"
-            >
-              <Download className="w-4 h-4" />
-              <span>Export CSV</span>
-            </Button>
-          )}
+
+          <div className="flex items-center space-x-2">
+            {hasPermission(modulePath, 'Export') && (
+              <Button variant="outline" onClick={handleExport} className="flex items-center space-x-2">
+                <Download className="w-4 h-4" />
+                <span>Export CSV</span>
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Table */}
         <div className="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                {columns.map((column) => (
-                  <TableHead
-                    key={column.key}
-                    className={column.sortable ? "cursor-pointer hover:bg-slate-50" : ""}
-                    onClick={() => column.sortable && onSort(column.key)}
-                  >
-                    <div className="flex items-center space-x-1">
-                      <span>{column.label}</span>
-                      {column.sortable && (
-                        <ArrowUpDown className="w-4 h-4" />
-                      )}
-                      {sortField === column.key && (
-                        <span className="text-xs">
-                          {sortDirection === 'asc' ? '↑' : '↓'}
-                        </span>
-                      )}
-                    </div>
-                  </TableHead>
-                ))}
-                {(canView(modulePath) || canEdit(modulePath) || canDelete(modulePath)) && (
-                  <TableHead>Actions</TableHead>
-                )}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.length === 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center p-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={columns.length + 1} className="text-center py-8">
-                    <div className="text-gray-500">
-                      <p className="text-lg font-medium">No data found</p>
-                      <p className="text-sm">
-                        {canAdd(modulePath) 
-                          ? "Add new items to get started"
-                          : "No items available"
-                        }
-                      </p>
-                    </div>
-                  </TableCell>
+                  {columns.map((column) => (
+                    <TableHead
+                      key={column.key}
+                      className={column.sortable ? "cursor-pointer hover:bg-slate-50" : ""}
+                      onClick={() => column.sortable && onSort(column.key)}
+                    >
+                      <div className="flex items-center space-x-1">
+                        <span>{column.label}</span>
+                        {column.sortable && <ArrowUpDown className="w-4 h-4" />}
+                        {sortField === column.key && (
+                          <span className="text-xs">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                        )}
+                      </div>
+                    </TableHead>
+                  ))}
+
+                  {(canView(modulePath) || canEdit(modulePath) || canDelete(modulePath)) && (
+                    <TableHead>Actions</TableHead>
+                  )}
                 </TableRow>
-              ) : (
-                data.map((item) => (
-                  <TableRow key={item.id}>
-                    {columns.map((column) => (
-                      <TableCell key={column.key}>
-                        {column.render ? column.render(item) : item[column.key]}
-                      </TableCell>
-                    ))}
-                    {(canView(modulePath) || canEdit(modulePath) || canDelete(modulePath)) && (
-                      <TableCell>
-                        <div className="flex items-center space-x-1">
-                          {canView(modulePath) && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => onView(item)}
-                              className="h-8 w-8 p-0"
-                              title="View details"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </Button>
-                          )}
-                          {canEdit(modulePath) && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => onEdit(item)}
-                              className="h-8 w-8 p-0"
-                              title="Edit"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </Button>
-                          )}
-                          {canDelete(modulePath) && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => onDelete(item)}
-                              className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
-                              title="Delete"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    )}
+              </TableHeader>
+
+              <TableBody>
+                {(!data || data.length === 0) ? (
+                  <TableRow>
+                    <TableCell colSpan={columns.length + 1} className="text-center py-8">
+                      <div className="text-gray-500">
+                        <p className="text-lg font-medium">No data found</p>
+                        <p className="text-sm">{canAdd(modulePath) ? "Add new items to get started" : "No items available"}</p>
+                      </div>
+                    </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                ) : (
+                  data.map((item) => (
+                    <TableRow key={item.id}>
+                      {columns.map((column) => (
+                        <TableCell key={column.key}>
+                          {column.render ? column.render(item) : (item[column.key] ?? '')}
+                        </TableCell>
+                      ))}
+
+                      {(canView(modulePath) || canEdit(modulePath) || canDelete(modulePath)) && (
+                        <TableCell>
+                          <div className="flex items-center space-x-1">
+                            {/* Additional actions slot */}
+                            {additionalActions && additionalActions(item)}
+
+                            {/* Standard actions */}
+                            {canView(modulePath) && (
+                              <Button variant="ghost" size="sm" onClick={() => onView(item)} className="h-8 w-8 p-0" title="View details">
+                                <Eye className="w-4 h-4" />
+                              </Button>
+                            )}
+                            {canEdit(modulePath) && (
+                              <Button variant="ghost" size="sm" onClick={() => onEdit(item)} className="h-8 w-8 p-0" title="Edit">
+                                <Edit2 className="w-4 h-4" />
+                              </Button>
+                            )}
+                            {canDelete(modulePath) && (
+                              <Button variant="ghost" size="sm" onClick={() => onDelete(item)} className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50" title="Delete">
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          )}
         </div>
 
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between mt-4">
-            <div className="text-sm text-gray-500">
-              Page {currentPage} of {totalPages}
-            </div>
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                disabled={currentPage === 1}
-              >
-                <ChevronLeft className="w-4 h-4" />
-                Previous
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                disabled={currentPage === totalPages}
-              >
-                Next
-                <ChevronRight className="w-4 h-4" />
-              </Button>
-            </div>
+        {/* Pagination controls */}
+        <div className="flex items-center justify-between mt-4">
+          <div className="text-sm text-gray-500">
+            Page {currentPage} of {totalPages}
           </div>
-        )}
+
+          <div className="flex items-center space-x-2">
+            <Button variant="outline" size="sm" onClick={goFirst} disabled={currentPage === 1} title="First page">
+              <ChevronsLeft className="w-4 h-4" />
+            </Button>
+            <Button variant="outline" size="sm" onClick={goPrev} disabled={currentPage === 1} title="Previous page">
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+
+            <div className="flex items-center space-x-2 px-2">
+              <span className="text-sm text-gray-600">Go to</span>
+              <Input
+                type="number"
+                min={1}
+                max={totalPages}
+                value={currentPage}
+                onChange={(e) => onPageInput(e.target.value)}
+                className="w-20 text-sm"
+                aria-label="Page number"
+              />
+            </div>
+
+            <Button variant="outline" size="sm" onClick={goNext} disabled={currentPage === totalPages} title="Next page">
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+            <Button variant="outline" size="sm" onClick={goLast} disabled={currentPage === totalPages} title="Last page">
+              <ChevronsRight className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
