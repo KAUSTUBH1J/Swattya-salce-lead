@@ -1,3 +1,5 @@
+/* eslint-disable no-unused-vars */
+
 import React from 'react';
 import { Badge } from './ui/badge';
 import { Label } from './ui/label';

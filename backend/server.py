@@ -234,6 +234,23 @@ def verify_password(password: str, hashed: str) -> bool:
     """Verify password against hash"""
     return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
 
+import re
+from fastapi import HTTPException
+
+def validate_password(password: str):
+    """Validate password with security rules"""
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters long")
+    if not re.search(r"[A-Z]", password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one uppercase letter")
+    if not re.search(r"[a-z]", password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one lowercase letter")
+    if not re.search(r"[0-9]", password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one digit")
+    if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one special character")
+    return True
+
 def create_jwt_token(data: dict) -> str:
     """Create JWT token"""
     expire = datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS)
@@ -927,6 +944,8 @@ async def create_user(user_data: UserCreate, current_user: User = Depends(get_cu
     if existing:
         raise HTTPException(status_code=400, detail="User already exists")
     
+    # Validate password before hashing
+    validate_password(user_data.password)
     # Create user
     user_dict = user_data.dict(exclude={"password"})
     user_dict['password_hash'] = hash_password(user_data.password)
